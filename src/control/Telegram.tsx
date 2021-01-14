@@ -21,34 +21,72 @@ enum TaskFeed {
     START,
     TYPE,
     STOCK,
-    AMOUNT,
+    FULL_STOCK_FUND,
     FIB_ZERO,
     FIB_ONE,
     CONFIRM,
 }
 
-// TODO Start- Move to strategy
 enum TaskType {
     CAMEL = 'CAMEL',
+    FLAG = 'FLAG',
     ZIGZAG = 'ZIGZAG',
 }
 enum StockName {
     BITMEX = 'BITMEX',
+    BINANCE = 'BINANCE',
+    BYBIT = 'BYBIT',
+    HUOBI = 'HUOBI',
+    OKEKS = 'OKEKS',
+    DERIBIT = 'DERIBIT',
+}
+
+enum SideType {
+    LONG,
+    SHORT,
 }
 
 type TaskConfig = {
     // Definable
     type: TaskType;
     stock: StockName;
-    amount: number;
+    fullFund: number;
     fibZero: number;
     fibOne: number;
 
     // Auto
-    // TODO -
+    side: SideType;
+    orderAmount: number;
+    zeroAmount: number;
+    takeAmount: number;
+    enterPrice: number;
+    stopPrice: number;
+    toZeroTriggerPrice: number;
+    zeroPrice: number;
+    takePrice: number;
 };
 
-// TODO -End
+const CAMEL_ENTER_LEVEL: number = 0.85;
+const CAMEL_STOP_LEVEL: number = 0.5;
+const CAMEL_ZERO_TRIGGER_LEVEL: number = 1.2;
+const CAMEL_ZERO_LEVEL: number = 0.85;
+const CAMEL_TAKE_LEVEL: number = 1.85;
+
+const FLAG_ENTER_LEVEL: number = 0.85;
+const FLAG_STOP_LEVEL: number = 0.5;
+const FLAG_ZERO_TRIGGER_LEVEL: number = 1.2;
+const FLAG_ZERO_LEVEL: number = 0.85;
+const FLAG_TAKE_LEVEL: number = 1.85;
+
+const ZIGZAG_ENTER_LEVEL: number = 0.63;
+const ZIGZAG_STOP_LEVEL: number = 0.38;
+const ZIGZAG_ZERO_TRIGGER_LEVEL: number = 0.9;
+const ZIGZAG_ZERO_LEVEL: number = 0.63;
+const ZIGZAG_TAKE_LEVEL: number = 1.2;
+
+const SQUEEZE_INDENT_PERCENT: number = 0.5;
+const MAX_LEVERAGE: number = 33;
+const MAX_AMOUNT: number = 190_000;
 
 export class Telegram {
     private bot: TelegramBot;
@@ -114,6 +152,11 @@ export class Telegram {
                 await this.handleTaskFeed(text);
                 break;
 
+            case 'cancel':
+                // TODO -
+                await this.send('TODO CANCEL TASK');
+                break;
+
             case 'status':
                 // TODO -
                 await this.send('TODO STATUS');
@@ -171,13 +214,13 @@ export class Telegram {
                 this.taskConfig.stock = text as StockName;
 
                 // Next
-                this.taskState = TaskFeed.AMOUNT;
+                this.taskState = TaskFeed.FULL_STOCK_FUND;
 
-                await this.send('Input full stock amount');
+                await this.send('Input full stock fund');
                 break;
             }
 
-            case TaskFeed.AMOUNT: {
+            case TaskFeed.FULL_STOCK_FUND: {
                 const value: number = Number(text);
 
                 if (!Number.isFinite(value) || value <= 0) {
@@ -185,7 +228,7 @@ export class Telegram {
                     return;
                 }
 
-                this.taskConfig.amount = value;
+                this.taskConfig.fullFund = value;
 
                 // Next
                 this.taskState = TaskFeed.FIB_ZERO;
@@ -237,8 +280,9 @@ export class Telegram {
                     return;
                 }
 
-                // TODO -
-                // TODO Calc extra fields
+                this.populateTaskAutoFields();
+
+                // TODO Start task
 
                 // Complete
                 await this.send('Task success started!');
@@ -296,9 +340,79 @@ export class Telegram {
         this.taskConfig = {
             type: null,
             stock: null,
-            amount: null,
+            fullFund: null,
             fibZero: null,
             fibOne: null,
+
+            side: null,
+            orderAmount: null,
+            zeroAmount: null,
+            takeAmount: null,
+            enterPrice: null,
+            takePrice: null,
+            stopPrice: null,
+            zeroPrice: null,
+            toZeroTriggerPrice: null,
         };
+    }
+
+    private populateTaskAutoFields(): void {
+        const task: TaskConfig = this.taskConfig;
+
+        if (task.type === TaskType.CAMEL) {
+            task.enterPrice = this.calcFibLevel(CAMEL_ENTER_LEVEL);
+            task.stopPrice = this.calcFibLevel(CAMEL_STOP_LEVEL);
+            task.toZeroTriggerPrice = this.calcFibLevel(CAMEL_ZERO_TRIGGER_LEVEL);
+            task.zeroPrice = this.calcFibLevel(CAMEL_ZERO_LEVEL);
+            task.takePrice = this.calcFibLevel(CAMEL_TAKE_LEVEL);
+        }
+
+        if (task.type === TaskType.FLAG) {
+            task.enterPrice = this.calcFibLevel(FLAG_ENTER_LEVEL);
+            task.stopPrice = this.calcFibLevel(FLAG_STOP_LEVEL);
+            task.toZeroTriggerPrice = this.calcFibLevel(FLAG_ZERO_TRIGGER_LEVEL);
+            task.zeroPrice = this.calcFibLevel(FLAG_ZERO_LEVEL);
+            task.takePrice = this.calcFibLevel(FLAG_TAKE_LEVEL);
+        }
+
+        if (task.type === TaskType.ZIGZAG) {
+            task.enterPrice = this.calcFibLevel(ZIGZAG_ENTER_LEVEL);
+            task.stopPrice = this.calcFibLevel(ZIGZAG_STOP_LEVEL);
+            task.toZeroTriggerPrice = this.calcFibLevel(ZIGZAG_ZERO_TRIGGER_LEVEL);
+            task.zeroPrice = this.calcFibLevel(ZIGZAG_ZERO_LEVEL);
+            task.takePrice = this.calcFibLevel(ZIGZAG_TAKE_LEVEL);
+        }
+
+        if ([TaskType.CAMEL, TaskType.FLAG, TaskType.ZIGZAG].includes(task.type)) {
+            if (task.fibOne > task.fibZero) {
+                task.side = SideType.LONG;
+
+                const stopIndent: number =
+                    1 - task.stopPrice / task.enterPrice + SQUEEZE_INDENT_PERCENT;
+
+                // TODO Calc amount
+            } else {
+                task.side = SideType.SHORT;
+
+                const stopIndent: number =
+                    task.stopPrice / task.enterPrice - 1 + SQUEEZE_INDENT_PERCENT;
+
+                // TODO Calc amount
+            }
+        }
+    }
+
+    private calcFibLevel(level: number): number {
+        const task: TaskConfig = this.taskConfig;
+
+        if (!task.fibZero || !task.fibOne) {
+            throw 'Invalid fib';
+        }
+
+        if (task.fibOne > task.fibZero) {
+            return task.fibZero + (task.fibOne - task.fibZero) * level;
+        } else {
+            return task.fibZero - (task.fibZero - task.fibOne) * level;
+        }
     }
 }
