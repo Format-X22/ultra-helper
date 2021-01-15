@@ -42,8 +42,8 @@ enum StockName {
 }
 
 enum SideType {
-    LONG,
-    SHORT,
+    LONG = 'LONG',
+    SHORT = 'SHORT',
 }
 
 type TaskConfig = {
@@ -56,37 +56,54 @@ type TaskConfig = {
 
     // Auto
     side: SideType;
-    orderAmount: number;
+    enterAmount: number;
     zeroAmount: number;
+    minProfitAmount: number;
     takeAmount: number;
+    stopAmount: number;
     enterPrice: number;
     stopPrice: number;
     toZeroTriggerPrice: number;
     zeroPrice: number;
+    toMinProfitTriggerPrice: number;
+    minProfitPrice: number;
     takePrice: number;
+
+    // Info
+    leverage: number;
 };
 
 const CAMEL_ENTER_LEVEL: number = 0.85;
 const CAMEL_STOP_LEVEL: number = 0.5;
 const CAMEL_ZERO_TRIGGER_LEVEL: number = 1.2;
 const CAMEL_ZERO_LEVEL: number = 0.85;
+const CAMEL_MIN_PROFIT_TRIGGER_LEVEL: number = 1.75;
+const CAMEL_MIN_PROFIT_LEVEL: number = 1;
 const CAMEL_TAKE_LEVEL: number = 1.85;
 
 const FLAG_ENTER_LEVEL: number = 0.85;
 const FLAG_STOP_LEVEL: number = 0.5;
 const FLAG_ZERO_TRIGGER_LEVEL: number = 1.2;
 const FLAG_ZERO_LEVEL: number = 0.85;
+const FLAG_MIN_PROFIT_TRIGGER_LEVEL: number = 1.75;
+const FLAG_MIN_PROFIT_LEVEL: number = 1;
 const FLAG_TAKE_LEVEL: number = 1.85;
 
 const ZIGZAG_ENTER_LEVEL: number = 0.63;
 const ZIGZAG_STOP_LEVEL: number = 0.38;
 const ZIGZAG_ZERO_TRIGGER_LEVEL: number = 0.9;
 const ZIGZAG_ZERO_LEVEL: number = 0.63;
+const ZIGZAG_MIN_PROFIT_TRIGGER_LEVEL: number = 1.15;
+const ZIGZAG_MIN_PROFIT_LEVEL: number = 0.95;
 const ZIGZAG_TAKE_LEVEL: number = 1.2;
 
 const SQUEEZE_INDENT_PERCENT: number = 0.5;
 const MAX_LEVERAGE: number = 33;
-const MAX_AMOUNT: number = 190_000;
+const MAX_FUND_LOSS_PERCENT: number = 50;
+// TODO Handle
+const MAX_ENTER_AMOUNT: number = 190_000;
+
+// TODO Check calculation with jest
 
 export class Telegram {
     private bot: TelegramBot;
@@ -245,7 +262,7 @@ export class Telegram {
                     return;
                 }
 
-                this.taskConfig.fibOne = value;
+                this.taskConfig.fibZero = value;
 
                 // Next
                 this.taskState = TaskFeed.FIB_ONE;
@@ -262,10 +279,12 @@ export class Telegram {
                     return;
                 }
 
-                this.taskConfig.fibZero = value;
+                this.taskConfig.fibOne = value;
 
                 // Next
                 this.taskState = TaskFeed.CONFIRM;
+
+                this.populateTaskAutoFields();
 
                 await this.send(
                     `All ok?\n${this.makeTaskConfigExplain()}`,
@@ -279,8 +298,6 @@ export class Telegram {
                     await this.send('Invalid value');
                     return;
                 }
-
-                this.populateTaskAutoFields();
 
                 // TODO Start task
 
@@ -345,14 +362,20 @@ export class Telegram {
             fibOne: null,
 
             side: null,
-            orderAmount: null,
+            enterAmount: null,
             zeroAmount: null,
+            minProfitAmount: null,
             takeAmount: null,
+            stopAmount: null,
             enterPrice: null,
             takePrice: null,
             stopPrice: null,
             zeroPrice: null,
             toZeroTriggerPrice: null,
+            minProfitPrice: null,
+            toMinProfitTriggerPrice: null,
+
+            leverage: null,
         };
     }
 
@@ -364,6 +387,8 @@ export class Telegram {
             task.stopPrice = this.calcFibLevel(CAMEL_STOP_LEVEL);
             task.toZeroTriggerPrice = this.calcFibLevel(CAMEL_ZERO_TRIGGER_LEVEL);
             task.zeroPrice = this.calcFibLevel(CAMEL_ZERO_LEVEL);
+            task.toMinProfitTriggerPrice = this.calcFibLevel(CAMEL_MIN_PROFIT_TRIGGER_LEVEL);
+            task.minProfitPrice = this.calcFibLevel(CAMEL_MIN_PROFIT_LEVEL);
             task.takePrice = this.calcFibLevel(CAMEL_TAKE_LEVEL);
         }
 
@@ -372,6 +397,8 @@ export class Telegram {
             task.stopPrice = this.calcFibLevel(FLAG_STOP_LEVEL);
             task.toZeroTriggerPrice = this.calcFibLevel(FLAG_ZERO_TRIGGER_LEVEL);
             task.zeroPrice = this.calcFibLevel(FLAG_ZERO_LEVEL);
+            task.toMinProfitTriggerPrice = this.calcFibLevel(FLAG_MIN_PROFIT_TRIGGER_LEVEL);
+            task.minProfitPrice = this.calcFibLevel(FLAG_MIN_PROFIT_LEVEL);
             task.takePrice = this.calcFibLevel(FLAG_TAKE_LEVEL);
         }
 
@@ -380,26 +407,51 @@ export class Telegram {
             task.stopPrice = this.calcFibLevel(ZIGZAG_STOP_LEVEL);
             task.toZeroTriggerPrice = this.calcFibLevel(ZIGZAG_ZERO_TRIGGER_LEVEL);
             task.zeroPrice = this.calcFibLevel(ZIGZAG_ZERO_LEVEL);
+            task.toMinProfitTriggerPrice = this.calcFibLevel(ZIGZAG_MIN_PROFIT_TRIGGER_LEVEL);
+            task.minProfitPrice = this.calcFibLevel(ZIGZAG_MIN_PROFIT_LEVEL);
             task.takePrice = this.calcFibLevel(ZIGZAG_TAKE_LEVEL);
         }
 
         if ([TaskType.CAMEL, TaskType.FLAG, TaskType.ZIGZAG].includes(task.type)) {
+            const squeeze: number = SQUEEZE_INDENT_PERCENT;
+            let stopIndent: number;
+
             if (task.fibOne > task.fibZero) {
                 task.side = SideType.LONG;
-
-                const stopIndent: number =
-                    1 - task.stopPrice / task.enterPrice + SQUEEZE_INDENT_PERCENT;
-
-                // TODO Calc amount
+                stopIndent = 1 - task.stopPrice / task.enterPrice + squeeze;
             } else {
                 task.side = SideType.SHORT;
+                stopIndent = task.stopPrice / task.enterPrice - 1 + squeeze;
+            }
 
-                const stopIndent: number =
-                    task.stopPrice / task.enterPrice - 1 + SQUEEZE_INDENT_PERCENT;
+            task.leverage = MAX_FUND_LOSS_PERCENT / stopIndent;
+            task.leverage = Number(task.leverage.toFixed(2));
 
-                // TODO Calc amount
+            if (task.leverage > MAX_LEVERAGE) {
+                task.leverage = MAX_LEVERAGE;
+            }
+
+            task.enterAmount = (task.fullFund * task.leverage) ^ 0;
+
+            const enterPrice: number = task.enterPrice;
+            const calc: (mul: number) => number = this.modifyAmount(task.enterAmount);
+
+            if (task.side === SideType.LONG) {
+                task.stopAmount = calc(-(100 / MAX_FUND_LOSS_PERCENT));
+                task.zeroAmount = calc(-(1 - task.zeroPrice / enterPrice + squeeze));
+                task.minProfitAmount = calc(-(1 - task.minProfitPrice / enterPrice + squeeze));
+                task.takeAmount = calc(-(task.takePrice / enterPrice - squeeze / 2));
+            } else {
+                task.stopAmount = calc(100 / MAX_FUND_LOSS_PERCENT);
+                task.zeroAmount = calc(task.zeroPrice / enterPrice - 1 + squeeze);
+                task.minProfitAmount = calc(task.minProfitPrice / enterPrice - 1 + squeeze);
+                task.takeAmount = calc(1 - task.takePrice / enterPrice - squeeze / 2);
             }
         }
+    }
+
+    private modifyAmount(amount: number): (mul: number) => number {
+        return (mul: number): number => (amount + amount * mul) ^ 0;
     }
 
     private calcFibLevel(level: number): number {
@@ -410,9 +462,9 @@ export class Telegram {
         }
 
         if (task.fibOne > task.fibZero) {
-            return task.fibZero + (task.fibOne - task.fibZero) * level;
+            return (task.fibZero + (task.fibOne - task.fibZero) * level) ^ 0;
         } else {
-            return task.fibZero - (task.fibZero - task.fibOne) * level;
+            return (task.fibZero - (task.fibZero - task.fibOne) * level) ^ 0;
         }
     }
 }
