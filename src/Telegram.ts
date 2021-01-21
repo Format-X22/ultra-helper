@@ -1,5 +1,5 @@
 import * as TelegramBot from 'node-telegram-bot-api';
-import { TaskCalculator, StockName, TaskConfig, TaskType } from './TaskCalculator';
+import { CandleSize, Direction, StockName, TaskCalculator } from './TaskCalculator';
 
 type TelegramKeyboard = {
     reply_markup: {
@@ -20,11 +20,13 @@ enum DialogFeed {
 
 enum TaskFeed {
     START,
-    TYPE,
     STOCK,
-    FULL_STOCK_FUND,
-    FIB_ZERO,
-    FIB_ONE,
+    DIRECTION,
+    RISK_AMOUNT,
+    CANDLE_SIZE,
+    LINE_START,
+    LINE_10,
+    BOTTOM,
     CONFIRM,
 }
 
@@ -122,25 +124,10 @@ export class Telegram {
 
         switch (this.taskState) {
             case TaskFeed.START: {
-                this.taskState = TaskFeed.TYPE;
-
-                // Next
-                await this.send('Choice task type', this.makeKeyboardWith(TaskType));
-                break;
-            }
-
-            case TaskFeed.TYPE: {
-                if (!Object.keys(TaskType).includes(text)) {
-                    await this.send('Invalid value');
-                    return;
-                }
-
-                this.taskCalculator.getConfig().type = text as TaskType;
-
-                // Next
                 this.taskState = TaskFeed.STOCK;
 
-                await this.send('Choice stock', this.makeKeyboardWith(StockName));
+                // Next
+                await this.send('Choice task type', this.makeKeyboardWith(StockName));
                 break;
             }
 
@@ -153,13 +140,13 @@ export class Telegram {
                 this.taskCalculator.getConfig().stock = text as StockName;
 
                 // Next
-                this.taskState = TaskFeed.FULL_STOCK_FUND;
+                this.taskState = TaskFeed.RISK_AMOUNT;
 
-                await this.send('Input full stock fund');
+                await this.send('Input risk amount');
                 break;
             }
 
-            case TaskFeed.FULL_STOCK_FUND: {
+            case TaskFeed.RISK_AMOUNT: {
                 const value: number = Number(text);
 
                 if (!Number.isFinite(value) || value <= 0) {
@@ -167,33 +154,46 @@ export class Telegram {
                     return;
                 }
 
-                this.taskCalculator.getConfig().fullFund = value;
+                this.taskCalculator.getConfig().riskAmount = value;
 
                 // Next
-                this.taskState = TaskFeed.FIB_ZERO;
+                this.taskState = TaskFeed.CANDLE_SIZE;
 
-                await this.send('Input Fibonacci 0 level price value');
+                await this.send('Choice candle size', this.makeKeyboardWith(CandleSize));
                 break;
             }
 
-            case TaskFeed.FIB_ZERO: {
-                const value: number = Number(text);
-
-                if (!Number.isFinite(value) || value <= 0) {
+            case TaskFeed.CANDLE_SIZE: {
+                if (!Object.keys(CandleSize).includes(text)) {
                     await this.send('Invalid value');
                     return;
                 }
 
-                this.taskCalculator.getConfig().fibZero = value;
+                this.taskCalculator.getConfig().candleSize = text as CandleSize;
 
                 // Next
-                this.taskState = TaskFeed.FIB_ONE;
+                this.taskState = TaskFeed.DIRECTION;
 
-                await this.send('Input Fibonacci 1 level price value');
+                await this.send('Choice direction', this.makeKeyboardWith(Direction));
                 break;
             }
 
-            case TaskFeed.FIB_ONE: {
+            case TaskFeed.DIRECTION: {
+                if (!Object.keys(Direction).includes(text)) {
+                    await this.send('Invalid value');
+                    return;
+                }
+
+                this.taskCalculator.getConfig().direction = text as Direction;
+
+                // Next
+                this.taskState = TaskFeed.LINE_START;
+
+                await this.send('Input line start price at now');
+                break;
+            }
+
+            case TaskFeed.LINE_START: {
                 const value: number = Number(text);
 
                 if (!Number.isFinite(value) || value <= 0) {
@@ -201,12 +201,45 @@ export class Telegram {
                     return;
                 }
 
-                this.taskCalculator.getConfig().fibOne = value;
+                this.taskCalculator.getConfig().lineStart = value;
+
+                // Next
+                this.taskState = TaskFeed.LINE_10;
+
+                await this.send('Input line start price after 10 candles');
+                break;
+            }
+
+            case TaskFeed.LINE_10: {
+                const value: number = Number(text);
+
+                if (!Number.isFinite(value) || value <= 0) {
+                    await this.send('Invalid value');
+                    return;
+                }
+
+                this.taskCalculator.getConfig().line10 = value;
+
+                // Next
+                this.taskState = TaskFeed.BOTTOM;
+
+                await this.send('Input current bottom price');
+                break;
+            }
+
+            case TaskFeed.BOTTOM: {
+                const value: number = Number(text);
+
+                if (!Number.isFinite(value) || value <= 0) {
+                    await this.send('Invalid value');
+                    return;
+                }
+
+                this.taskCalculator.getConfig().bottom = value;
 
                 // Next
                 this.taskState = TaskFeed.CONFIRM;
-
-                this.taskCalculator.populateTaskAutoFields();
+                this.taskCalculator.populateAutoFields();
 
                 await this.send(
                     `All ok?\n${this.makeTaskConfigExplain()}`,
