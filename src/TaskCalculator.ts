@@ -28,24 +28,6 @@ export type TaskConfig = {
     bottom: number;
 };
 
-type FibLevelConfig = {
-    ENTER_LEVEL: number;
-    STOP_LEVEL: number;
-    ZERO_TRIGGER_LEVEL: number;
-    ZERO_LEVEL: number;
-    MIN_PROFIT_TRIGGER_LEVEL: number;
-    MIN_PROFIT_LEVEL: number;
-    TAKE_LEVEL: number;
-};
-
-// TODO -
-const SQUEEZE_INDENT_PERCENT: number = 0.5;
-const MAX_LEVERAGE: number = 125;
-const MAX_ENTER_AMOUNT: object = {
-    [CandleSize.H1]: 190_000,
-    [CandleSize.H4]: 240_000,
-};
-
 export class TaskCalculator {
     private taskConfig: TaskConfig;
 
@@ -71,7 +53,15 @@ export class TaskCalculator {
     }
 
     public populateAutoFields(): void {
-        // TODO Calc line 20
-        // TODO -
+        const config: TaskConfig = this.taskConfig;
+        const step: number = Math.abs((config.lineStart - config.line10) / 10);
+        const stepCount: number = 20;
+        const stepSum: number = step * stepCount;
+
+        if (config.lineStart > config.line10) {
+            config.line20 = config.lineStart - stepSum;
+        } else {
+            config.line20 = config.lineStart + stepSum;
+        }
     }
 }
