@@ -1,5 +1,6 @@
 import * as TelegramBot from 'node-telegram-bot-api';
-import { CandleSize, Direction, StockName, TaskCalculator } from './TaskCalculator';
+import { CandleSize, Direction, StockName, TaskCalculator, TaskConfig } from './TaskCalculator';
+import { Executor, Task } from './Executor';
 
 type TelegramKeyboard = {
     reply_markup: {
@@ -8,14 +9,22 @@ type TelegramKeyboard = {
     };
 };
 
-enum ConfirmButtonsText {
+enum ConfirmButtons {
     OK = 'OK',
     CANCEL = 'CANCEL',
+}
+
+enum RootCommands {
+    STATUS = 'STATUS',
+    TASK = 'TASK',
+    CANCEL = 'CANCEL',
+    PING = 'PING',
 }
 
 enum DialogFeed {
     ROOT,
     TASK,
+    CANCEL,
 }
 
 enum TaskFeed {
@@ -30,13 +39,23 @@ enum TaskFeed {
     CONFIRM,
 }
 
+enum CancelFeed {
+    START,
+    CHOICE,
+    CONFIRM,
+}
+
 export class Telegram {
     private bot: TelegramBot;
     private dialogState: DialogFeed = DialogFeed.ROOT;
     private taskState: TaskFeed = TaskFeed.START;
     private taskCalculator: TaskCalculator;
+    private cancelState: CancelFeed;
+    private taskToCancel: number;
+    private executor: Executor;
 
     constructor(private key: string, private ownerId: number) {
+        this.executor = new Executor();
         this.taskCalculator = new TaskCalculator();
         this.bot = new TelegramBot(key, { polling: true });
 
@@ -49,14 +68,22 @@ export class Telegram {
             }
         );
 
-        this.send('Started!').catch((error: Error): void => {
+        this.send('Started!', this.makeKeyboardWith(RootCommands)).catch((error: Error): void => {
             console.error(error);
             process.exit(1);
         });
     }
 
-    public async send(text: string, options?: TelegramKeyboard): Promise<void> {
-        await this.bot.sendMessage(this.ownerId, text, options || this.makeKeyboardRemover());
+    public async send(
+        text: string,
+        options?: TelegramKeyboard,
+        disableKeyboardRemover?: boolean
+    ): Promise<void> {
+        if (!options && !disableKeyboardRemover) {
+            options = this.makeKeyboardRemover();
+        }
+
+        await this.bot.sendMessage(this.ownerId, text, options || undefined);
     }
 
     private async checkAccess(id: number): Promise<boolean> {
@@ -73,9 +100,13 @@ export class Telegram {
                 await this.handleTaskFeed(text);
                 break;
 
+            case DialogFeed.CANCEL:
+                await this.handleCancelFeed(text);
+                break;
+
             default:
                 console.error('Unknown dialog type');
-                await this.send('Unknown dialog type');
+                await this.send('Unknown dialog type', this.makeKeyboardWith(RootCommands));
 
                 this.dialogState = DialogFeed.ROOT;
         }
@@ -83,57 +114,65 @@ export class Telegram {
 
     private async handleRootFeed(text: string): Promise<void> {
         switch (text) {
-            case 'ping':
-                await this.send('pong');
+            case RootCommands.PING:
+                await this.send('pong', this.makeKeyboardWith(RootCommands));
                 break;
 
-            case 'task':
+            case RootCommands.TASK:
                 this.dialogState = DialogFeed.TASK;
                 this.taskState = TaskFeed.START;
-                await this.handleTaskFeed(text);
+                await this.handleTaskFeed();
                 break;
 
-            case 'cancel':
-                // TODO -
-                await this.send('TODO CANCEL TASK');
+            case RootCommands.CANCEL:
+                this.dialogState = DialogFeed.CANCEL;
+                this.cancelState = CancelFeed.START;
+                await this.handleCancelFeed();
                 break;
 
-            case 'status':
-                // TODO -
-                await this.send('TODO STATUS');
+            case RootCommands.STATUS:
+                const statusArray: Array<Task> = await this.executor.getStatus();
+                let statusByTask: Array<string> = [];
+
+                for (const task of statusArray) {
+                    statusByTask.push(this.makeObjectExplain(task));
+                }
+
+                await this.send(
+                    `Current status:\n ${statusByTask.join('\n')}`,
+                    this.makeKeyboardWith(RootCommands)
+                );
                 break;
 
             default:
-                await this.send('Unknown command');
+                await this.send('Unknown command', this.makeKeyboardWith(RootCommands));
         }
     }
 
-    private async handleTaskFeed(text: string): Promise<void> {
+    private async handleTaskFeed(text: string = ''): Promise<void> {
         if (text.toLowerCase() === 'cancel') {
             this.dialogState = DialogFeed.ROOT;
 
             this.taskCalculator.clearConfig();
 
-            await this.send('Task creation canceled', {
-                reply_markup: {
-                    remove_keyboard: true,
-                },
-            });
+            await this.send('Task creation canceled', this.makeKeyboardWith(RootCommands));
             return;
         }
 
         switch (this.taskState) {
             case TaskFeed.START: {
-                this.taskState = TaskFeed.STOCK;
+                await this.send('Type CANCEL in any step to cancel task creation');
 
                 // Next
+                this.taskState = TaskFeed.STOCK;
+
                 await this.send('Choice task type', this.makeKeyboardWith(StockName));
                 break;
             }
 
             case TaskFeed.STOCK: {
                 if (!Object.keys(StockName).includes(text)) {
-                    await this.send('Invalid value');
+                    await this.send('Invalid value', null, true);
                     return;
                 }
 
@@ -150,7 +189,7 @@ export class Telegram {
                 const value: number = Number(text);
 
                 if (!Number.isFinite(value) || value <= 0) {
-                    await this.send('Invalid value');
+                    await this.send('Invalid value', null, true);
                     return;
                 }
 
@@ -165,7 +204,7 @@ export class Telegram {
 
             case TaskFeed.CANDLE_SIZE: {
                 if (!Object.keys(CandleSize).includes(text)) {
-                    await this.send('Invalid value');
+                    await this.send('Invalid value', null, true);
                     return;
                 }
 
@@ -180,7 +219,7 @@ export class Telegram {
 
             case TaskFeed.DIRECTION: {
                 if (!Object.keys(Direction).includes(text)) {
-                    await this.send('Invalid value');
+                    await this.send('Invalid value', null, true);
                     return;
                 }
 
@@ -197,7 +236,7 @@ export class Telegram {
                 const value: number = Number(text);
 
                 if (!Number.isFinite(value) || value <= 0) {
-                    await this.send('Invalid value');
+                    await this.send('Invalid value', null, true);
                     return;
                 }
 
@@ -214,7 +253,7 @@ export class Telegram {
                 const value: number = Number(text);
 
                 if (!Number.isFinite(value) || value <= 0) {
-                    await this.send('Invalid value');
+                    await this.send('Invalid value', null, true);
                     return;
                 }
 
@@ -231,7 +270,7 @@ export class Telegram {
                 const value: number = Number(text);
 
                 if (!Number.isFinite(value) || value <= 0) {
-                    await this.send('Invalid value');
+                    await this.send('Invalid value', null, true);
                     return;
                 }
 
@@ -241,20 +280,22 @@ export class Telegram {
                 this.taskState = TaskFeed.CONFIRM;
                 this.taskCalculator.populateAutoFields();
 
+                const resultConfig: TaskConfig = this.taskCalculator.getConfig();
+
                 await this.send(
-                    `All ok?\n${this.makeTaskConfigExplain()}`,
-                    this.makeKeyboardWith(ConfirmButtonsText)
+                    `All ok?\n${this.makeObjectExplain(resultConfig)}`,
+                    this.makeKeyboardWith(ConfirmButtons)
                 );
                 break;
             }
 
             case TaskFeed.CONFIRM: {
-                if (!Object.keys(ConfirmButtonsText).includes(text)) {
-                    await this.send('Invalid value');
+                if (!Object.keys(ConfirmButtons).includes(text)) {
+                    await this.send('Invalid value', null, true);
                     return;
                 }
 
-                // TODO Start task
+                await this.executor.startTask(this.taskCalculator.getConfig());
 
                 // Complete
                 await this.send('Task success started!');
@@ -268,7 +309,84 @@ export class Telegram {
 
             default: {
                 console.error('Unknown task feed type');
-                await this.send('Unknown task feed type');
+                await this.send('Unknown task feed type', this.makeKeyboardWith(RootCommands));
+
+                this.dialogState = DialogFeed.ROOT;
+            }
+        }
+    }
+
+    private async handleCancelFeed(text: string = ''): Promise<void> {
+        if (text.toLowerCase() === 'cancel') {
+            this.dialogState = DialogFeed.ROOT;
+
+            this.taskCalculator.clearConfig();
+
+            await this.send('Cancel task canceled', this.makeKeyboardWith(RootCommands));
+            return;
+        }
+
+        switch (this.cancelState) {
+            case CancelFeed.START: {
+                // Next
+                this.cancelState = CancelFeed.CHOICE;
+
+                const tasks: Array<Task> = await this.executor.getStatus();
+                const ids: Array<string> = tasks.map((task: Task): string => String(task.id));
+
+                await this.send('Choice task', this.makeKeyboardWith(ids));
+                break;
+            }
+
+            case CancelFeed.CHOICE: {
+                const id: number = Number(text);
+
+                if (!Number.isFinite(id) || id < 0) {
+                    await this.send('Invalid id', null, true);
+                    break;
+                }
+
+                // Next
+                this.cancelState = CancelFeed.CONFIRM;
+
+                const tasks: Array<Task> = await this.executor.getStatus();
+                const selected: Task = tasks.find((task: Task): boolean => task.id === id);
+
+                if (!selected) {
+                    await this.send('Invalid id', null, true);
+                }
+
+                this.taskToCancel = selected.id;
+
+                await this.send(
+                    `Cancel task?\n${this.makeObjectExplain(selected)}`,
+                    this.makeKeyboardWith(ConfirmButtons)
+                );
+                break;
+            }
+
+            case CancelFeed.CONFIRM: {
+                if (!Object.keys(ConfirmButtons).includes(text)) {
+                    await this.send('Invalid value', null, true);
+                    return;
+                }
+
+                // Complete
+                const cancelResult: string = await this.executor.cancelTask(this.taskToCancel);
+
+                await this.send(
+                    `Cancel result: ${cancelResult}`,
+                    this.makeKeyboardWith(RootCommands)
+                );
+
+                this.cancelState = CancelFeed.START;
+                this.dialogState = DialogFeed.ROOT;
+                break;
+            }
+
+            default: {
+                console.error('Unknown task feed type');
+                await this.send('Unknown task feed type', this.makeKeyboardWith(RootCommands));
 
                 this.dialogState = DialogFeed.ROOT;
             }
@@ -299,11 +417,9 @@ export class Telegram {
         };
     }
 
-    private makeTaskConfigExplain(): string {
-        const taskConfigAsArray: Array<Array<string>> = Object.entries(
-            this.taskCalculator.getConfig() as object
-        );
-        const lines: Array<string> = taskConfigAsArray.map(
+    private makeObjectExplain(object: object): string {
+        const entries: Array<[string, string]> = Object.entries(object);
+        const lines: Array<string> = entries.map(
             ([key, value]: [string, string]): string => `${key} = ${value}`
         );
 
