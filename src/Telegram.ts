@@ -298,7 +298,7 @@ export class Telegram {
                 await this.executor.startTask(this.taskCalculator.getConfig());
 
                 // Complete
-                await this.send('Task success started!');
+                await this.send('Task success started!', this.makeKeyboardWith(RootCommands));
 
                 this.taskCalculator.clearConfig();
 
