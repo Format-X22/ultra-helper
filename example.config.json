@@ -2,5 +2,10 @@
   "telegram": {
     "owner": 0,
     "key": ""
+  },
+  "smsc": {
+    "login": "",
+    "password": "",
+    "phones": ""
   }
 }
