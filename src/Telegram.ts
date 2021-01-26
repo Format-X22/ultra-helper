@@ -1,5 +1,12 @@
 import * as TelegramBot from 'node-telegram-bot-api';
-import { CandleSize, Direction, StockName, TaskCalculator, TaskConfig } from './TaskCalculator';
+import {
+    CandleSize,
+    Currency,
+    Direction,
+    StockName,
+    TaskCalculator,
+    TaskConfig,
+} from './TaskCalculator';
 import { Executor, Task } from './Executor';
 
 type TelegramKeyboard = {
@@ -30,6 +37,7 @@ enum DialogFeed {
 enum TaskFeed {
     START,
     STOCK,
+    CURRENCY,
     DIRECTION,
     RISK_AMOUNT,
     CANDLE_SIZE,
@@ -179,21 +187,19 @@ export class Telegram {
                 this.taskCalculator.getConfig().stock = text as StockName;
 
                 // Next
-                this.taskState = TaskFeed.RISK_AMOUNT;
+                this.taskState = TaskFeed.CURRENCY;
 
-                await this.send('Input risk amount');
+                await this.send('Choice currency', this.makeKeyboardWith(Currency));
                 break;
             }
 
-            case TaskFeed.RISK_AMOUNT: {
-                const value: number = Number(text);
-
-                if (!Number.isFinite(value) || value <= 0) {
+            case TaskFeed.CURRENCY: {
+                if (!Object.keys(Currency).includes(text)) {
                     await this.send('Invalid value', null, true);
                     return;
                 }
 
-                this.taskCalculator.getConfig().riskAmount = value;
+                this.taskCalculator.getConfig().currency = text as Currency;
 
                 // Next
                 this.taskState = TaskFeed.CANDLE_SIZE;
@@ -224,6 +230,23 @@ export class Telegram {
                 }
 
                 this.taskCalculator.getConfig().direction = text as Direction;
+
+                // Next
+                this.taskState = TaskFeed.RISK_AMOUNT;
+
+                await this.send('Input risk amount');
+                break;
+            }
+
+            case TaskFeed.RISK_AMOUNT: {
+                const value: number = Number(text);
+
+                if (!Number.isFinite(value) || value <= 0) {
+                    await this.send('Invalid value', null, true);
+                    return;
+                }
+
+                this.taskCalculator.getConfig().riskAmount = value;
 
                 // Next
                 this.taskState = TaskFeed.LINE_START;
@@ -279,6 +302,7 @@ export class Telegram {
                 // Next
                 this.taskState = TaskFeed.CONFIRM;
                 this.taskCalculator.populateAutoFields();
+                this.taskCalculator.calcHint();
 
                 const resultConfig: TaskConfig = this.taskCalculator.getConfig();
 
@@ -419,9 +443,13 @@ export class Telegram {
 
     private makeObjectExplain(object: object): string {
         const entries: Array<[string, string]> = Object.entries(object);
-        const lines: Array<string> = entries.map(
-            ([key, value]: [string, string]): string => `${key} = ${value}`
-        );
+        const lines: Array<string> = entries.map(([key, value]: [string, string]): string => {
+            if (Number.isFinite(parseInt(value))) {
+                value = parseFloat(value).toFixed(2);
+            }
+
+            return `${key} = ${value}`;
+        });
 
         return ['', ...lines, ''].join('\n');
     }
