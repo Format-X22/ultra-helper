@@ -7,7 +7,8 @@ import {
     TaskCalculator,
     TaskConfig,
 } from './TaskCalculator';
-import { Executor, Task } from './Executor';
+import { Executor } from './Executor';
+import { TaskExplain } from './Task';
 
 type TelegramKeyboard = {
     reply_markup: {
@@ -139,7 +140,7 @@ export class Telegram {
                 break;
 
             case RootCommands.STATUS:
-                const statusArray: Array<Task> = await this.executor.getStatus();
+                const statusArray: Array<TaskExplain> = await this.executor.getStatus();
                 let statusByTask: Array<string> = [];
 
                 for (const task of statusArray) {
@@ -355,8 +356,7 @@ export class Telegram {
                 // Next
                 this.cancelState = CancelFeed.CHOICE;
 
-                const tasks: Array<Task> = await this.executor.getStatus();
-                const ids: Array<string> = tasks.map((task: Task): string => String(task.id));
+                const ids: Array<number> = this.executor.getTaskIds();
 
                 await this.send('Choice task', this.makeKeyboardWith(ids));
                 break;
@@ -373,8 +373,10 @@ export class Telegram {
                 // Next
                 this.cancelState = CancelFeed.CONFIRM;
 
-                const tasks: Array<Task> = await this.executor.getStatus();
-                const selected: Task = tasks.find((task: Task): boolean => task.id === id);
+                const taskStatuses: Array<TaskExplain> = await this.executor.getStatus();
+                const selected: TaskExplain = taskStatuses.find(
+                    (task: TaskExplain): boolean => task.id === id
+                );
 
                 if (!selected) {
                     await this.send('Invalid id', null, true);
@@ -417,8 +419,10 @@ export class Telegram {
         }
     }
 
-    private makeKeyboardWith(arrayOfStringOrEnum: Array<string> | object): TelegramKeyboard {
-        let buttons: Array<string>;
+    private makeKeyboardWith(
+        arrayOfStringOrEnum: Array<string | number> | object
+    ): TelegramKeyboard {
+        let buttons: Array<string | number>;
 
         if (Array.isArray(arrayOfStringOrEnum)) {
             buttons = arrayOfStringOrEnum;
@@ -428,7 +432,7 @@ export class Telegram {
 
         return {
             reply_markup: {
-                keyboard: buttons.map((v: string): Array<string> => [v]),
+                keyboard: buttons.map((v: string | number): Array<string> => [String(v)]),
             },
         };
     }

@@ -1,48 +1,62 @@
-import { TaskConfig } from './TaskCalculator';
+import { StockName, TaskConfig } from './TaskCalculator';
 import { PhoneCall } from './PhoneCall';
+import { bitmex as BitMex, Exchange } from 'ccxt';
+import { Task, TaskExplain } from './Task';
 
 const {
     smsc,
+    stock,
 }: {
     smsc: {
         login: string;
         password: string;
         phones: string;
     };
+    stock: {
+        bitmex: {
+            apiKey: string;
+            secret: string;
+        };
+    };
 } = require('../config.json');
 
-enum TaskState {
+export enum TaskState {
     INITIAL = 'INITIAL',
     WAITING = 'WAITING',
     UNHANDLED_ERROR = 'UNHANDLED_ERROR',
     HANDLED_ERROR = 'HANDLED_ERROR',
 }
 
-export type Task = {
-    id: number;
-    state: TaskState;
-    previewState: TaskState;
-};
-
 const LOOP_INTERVAL: number = 5000;
 
 export class Executor {
+    private readonly taskMap: Map<number, Task> = new Map<number, Task>();
+    private readonly phone: PhoneCall;
+    private readonly exchanges: Map<StockName, Exchange> = new Map<StockName, Exchange>();
     private lastTaskId: number = 0;
-    private taskMap: Map<number, Task>;
-    private phone: PhoneCall;
 
     constructor() {
         this.phone = new PhoneCall(smsc.login, smsc.password, smsc.phones);
+        this.exchanges.set(
+            StockName.BITMEX,
+            new BitMex({
+                apiKey: stock.bitmex.apiKey,
+                secret: stock.bitmex.secret,
+            })
+        );
 
         setTimeout(this.runIteration.bind(this), LOOP_INTERVAL);
     }
 
     public async startTask(config: TaskConfig): Promise<void> {
-        const task: Task = this.getEmptyTask();
+        const task: Task = new Task(++this.lastTaskId, this.phone, this.exchanges);
 
-        // TODO -
+        task.config = config;
+        task.startTime = new Date();
 
-        this.updateTaskState(task, TaskState.WAITING);
+        task.syncCurrentTaskValues();
+
+        task.updateTaskState(TaskState.WAITING);
         this.taskMap.set(task.id, task);
     }
 
@@ -54,9 +68,9 @@ export class Executor {
         }
 
         try {
-            await this.handleTaskCancel(task);
+            await task.handleTaskCancel();
         } catch (error) {
-            await this.handleTaskError(task, error);
+            await task.handleTaskError(error);
         }
 
         this.taskMap.delete(id);
@@ -64,16 +78,12 @@ export class Executor {
         return 'Success task cancel';
     }
 
-    public async getStatus(): Promise<Array<Task>> {
-        return Array.from(this.taskMap.values());
+    public getTaskIds(): Array<number> {
+        return Array.from(this.taskMap.keys());
     }
 
-    private getEmptyTask(): Task {
-        return {
-            id: ++this.lastTaskId,
-            state: TaskState.INITIAL,
-            previewState: null,
-        };
+    public async getStatus(): Promise<Array<TaskExplain>> {
+        return Array.from(this.taskMap.values()).map((task: Task): TaskExplain => task.explain());
     }
 
     private async runIteration(): Promise<void> {
@@ -86,52 +96,12 @@ export class Executor {
             }
 
             try {
-                await this.handleTaskIteration(task);
+                await task.handleTaskIteration();
             } catch (error) {
-                await this.handleTaskError(task, error);
+                await task.handleTaskError(error);
             }
         }
 
         setTimeout(this.runIteration.bind(this), LOOP_INTERVAL);
-    }
-
-    private async handleTaskIteration(task: Task): Promise<void> {
-        switch (task.state) {
-            // TODO -
-
-            default: {
-                await this.handleTaskError(task, new Error('Unknown state'));
-            }
-        }
-
-        // TODO -
-    }
-
-    private async handleTaskCancel(task: Task): Promise<void> {
-        switch (task.state) {
-            // TODO -
-
-            default: {
-                await this.handleTaskError(task, new Error('Unknown state'));
-            }
-        }
-
-        // TODO -
-    }
-
-    private async handleTaskError(task: Task, error: Error): Promise<void> {
-        console.error(error);
-        this.updateTaskState(task, TaskState.UNHANDLED_ERROR);
-        await this.phone.doCall('Error');
-        this.updateTaskState(task, TaskState.HANDLED_ERROR);
-    }
-
-    private updateTaskState(task: Task, newState: TaskState): void {
-        const taskAsJson: string = JSON.stringify(task, null, 2);
-
-        console.log(`Task[${task.id}] ${task.state}=>${newState}, ${taskAsJson}`);
-
-        task.previewState = task.state;
-        task.state = newState;
     }
 }
