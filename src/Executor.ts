@@ -1,7 +1,7 @@
 import { StockName, TaskConfig } from './TaskCalculator';
 import { PhoneCall } from './PhoneCall';
 import { bitmex as BitMex, Exchange } from 'ccxt';
-import { Task, TaskExplain } from './Task';
+import { Task, TaskExplain, TaskState } from './Task';
 
 const {
     smsc,
@@ -19,13 +19,6 @@ const {
         };
     };
 } = require('../config.json');
-
-export enum TaskState {
-    INITIAL = 'INITIAL',
-    WAITING = 'WAITING',
-    UNHANDLED_ERROR = 'UNHANDLED_ERROR',
-    HANDLED_ERROR = 'HANDLED_ERROR',
-}
 
 const LOOP_INTERVAL: number = 5000;
 
@@ -51,7 +44,6 @@ export class Executor {
     public async startTask(config: TaskConfig): Promise<void> {
         const task: Task = new Task(++this.lastTaskId, this.phone, this.exchanges, config);
 
-        task.updateState(TaskState.WAITING);
         this.taskMap.set(task.getId(), task);
     }
 

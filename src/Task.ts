@@ -1,7 +1,16 @@
 import { Exchange } from 'ccxt';
 import { StockName, TaskConfig } from './TaskCalculator';
-import { TaskState } from './Executor';
 import { PhoneCall } from './PhoneCall';
+
+export enum TaskState {
+    INITIAL = 'INITIAL',
+    WAITING = 'WAITING',
+    IN_POSITION = 'IN_POSITION',
+    STOP = 'STOP',
+    TAKE = 'TAKE',
+    UNHANDLED_ERROR = 'UNHANDLED_ERROR',
+    HANDLED_ERROR = 'HANDLED_ERROR',
+}
 
 export type TaskExplain = {
     id: number;
@@ -54,40 +63,116 @@ export class Task {
 
     public async handleTaskIteration(): Promise<void> {
         switch (this.state) {
-            // TODO -
-
-            default: {
-                await this.handleTaskError(new Error('Unknown state'));
+            case TaskState.INITIAL: {
+                await this.syncCurrentValues();
+                await this.placeEnterOrder();
+                await this.placeTakeOrder();
+                this.updateState(TaskState.WAITING);
+                break;
             }
-        }
 
-        // TODO -
+            case TaskState.WAITING: {
+                if (await this.isEnter()) {
+                    await this.placeStopOrder();
+                    this.updateState(TaskState.IN_POSITION);
+                } else {
+                    const isChanged: boolean = await this.syncCurrentValues();
+
+                    if (isChanged) {
+                        await this.moveEnterOrder();
+                        await this.moveTakeOrder();
+                    }
+                }
+                break;
+            }
+
+            case TaskState.IN_POSITION: {
+                if (await this.isStop()) {
+                    await this.cancelTakeOrder();
+                    this.updateState(TaskState.STOP);
+                } else if (await this.isTake()) {
+                    await this.cancelStopOrder();
+                    this.updateState(TaskState.TAKE);
+                }
+                break;
+            }
+
+            case TaskState.STOP:
+            case TaskState.TAKE:
+            case TaskState.UNHANDLED_ERROR:
+            case TaskState.HANDLED_ERROR:
+                break;
+        }
     }
 
     public async handleTaskCancel(): Promise<void> {
         switch (this.state) {
             // TODO -
 
-            default: {
-                await this.handleTaskError(new Error('Unknown state'));
-            }
+            case TaskState.STOP:
+            case TaskState.TAKE:
+            case TaskState.UNHANDLED_ERROR:
+            case TaskState.HANDLED_ERROR:
+                break;
         }
-
-        // TODO -
     }
 
-    public async handleTaskError(error: Error): Promise<void> {
+    public async handleTaskError(error: Error | string): Promise<void> {
         console.error(error);
         this.updateState(TaskState.UNHANDLED_ERROR);
         await this.phone.doCall('Error');
         this.updateState(TaskState.HANDLED_ERROR);
     }
 
-    private async syncCurrentValues(): Promise<void> {
-        if (!this.current.bottom) {
-            this.current.bottom = this.config.bottom;
-        }
+    private async syncCurrentValues(): Promise<boolean> {
+        // TODO -
+        return true;
+    }
 
+    private async isEnter(): Promise<boolean> {
+        // TODO -
+        return true;
+    }
+
+    private async isTake(): Promise<boolean> {
+        // TODO -
+        return true;
+    }
+
+    private async isStop(): Promise<boolean> {
+        // TODO -
+        return true;
+    }
+
+    private async placeEnterOrder(): Promise<void> {
+        // TODO -
+    }
+
+    private async moveEnterOrder(): Promise<void> {
+        // TODO -
+    }
+
+    private async cancelEnterOrder(): Promise<void> {
+        // TODO -
+    }
+
+    private async placeTakeOrder(): Promise<void> {
+        // TODO -
+    }
+
+    private async moveTakeOrder(): Promise<void> {
+        // TODO -
+    }
+
+    private async cancelTakeOrder(): Promise<void> {
+        // TODO -
+    }
+
+    private async placeStopOrder(): Promise<void> {
+        // TODO -
+    }
+
+    private async cancelStopOrder(): Promise<void> {
         // TODO -
     }
 
