@@ -49,15 +49,10 @@ export class Executor {
     }
 
     public async startTask(config: TaskConfig): Promise<void> {
-        const task: Task = new Task(++this.lastTaskId, this.phone, this.exchanges);
+        const task: Task = new Task(++this.lastTaskId, this.phone, this.exchanges, config);
 
-        task.config = config;
-        task.startTime = new Date();
-
-        task.syncCurrentTaskValues();
-
-        task.updateTaskState(TaskState.WAITING);
-        this.taskMap.set(task.id, task);
+        task.updateState(TaskState.WAITING);
+        this.taskMap.set(task.getId(), task);
     }
 
     public async cancelTask(id: number): Promise<string> {
@@ -88,10 +83,9 @@ export class Executor {
 
     private async runIteration(): Promise<void> {
         for (const task of this.taskMap.values()) {
-            if (
-                task.state === TaskState.HANDLED_ERROR ||
-                task.state === TaskState.UNHANDLED_ERROR
-            ) {
+            const state: TaskState = task.getState();
+
+            if (state === TaskState.HANDLED_ERROR || state === TaskState.UNHANDLED_ERROR) {
                 continue;
             }
 

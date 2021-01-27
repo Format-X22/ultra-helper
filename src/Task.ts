@@ -9,23 +9,48 @@ export type TaskExplain = {
 };
 
 export class Task {
-    public state: TaskState = TaskState.INITIAL;
-    public previewState: TaskState;
-    public config: TaskConfig;
-    public startTime: Date;
-    public current: {
+    private state: TaskState = TaskState.INITIAL;
+    private previewState: TaskState;
+    private startTime: Date;
+    private current: {
         bottom: number;
         enter: number;
         stop: number;
         take: number;
         amount: number;
+    } = {
+        bottom: null,
+        enter: null,
+        stop: null,
+        take: null,
+        amount: null,
     };
 
     constructor(
-        public id: number,
+        private id: number,
         private phone: PhoneCall,
-        private exchanges: Map<StockName, Exchange>
-    ) {}
+        private exchanges: Map<StockName, Exchange>,
+        private config: TaskConfig
+    ) {
+        this.startTime = new Date();
+    }
+
+    public getId(): number {
+        return this.id;
+    }
+
+    public getState(): TaskState {
+        return this.state;
+    }
+
+    public updateState(newState: TaskState): void {
+        const explainJson: string = JSON.stringify(this.explain(), null, 2);
+
+        console.log(`Task[${this.id}] ${this.state}=>${newState}, ${explainJson}`);
+
+        this.previewState = this.state;
+        this.state = newState;
+    }
 
     public async handleTaskIteration(): Promise<void> {
         switch (this.state) {
@@ -53,29 +78,16 @@ export class Task {
 
     public async handleTaskError(error: Error): Promise<void> {
         console.error(error);
-        this.updateTaskState(TaskState.UNHANDLED_ERROR);
+        this.updateState(TaskState.UNHANDLED_ERROR);
         await this.phone.doCall('Error');
-        this.updateTaskState(TaskState.HANDLED_ERROR);
+        this.updateState(TaskState.HANDLED_ERROR);
     }
 
-    public updateTaskState(newState: TaskState): void {
-        const explainJson: string = JSON.stringify(this.explain(), null, 2);
-
-        console.log(`Task[${this.id}] ${this.state}=>${newState}, ${explainJson}`);
-
-        this.previewState = this.state;
-        this.state = newState;
-    }
-
-    public syncCurrentTaskValues(): void {
+    private async syncCurrentValues(): Promise<void> {
         if (!this.current.bottom) {
             this.current.bottom = this.config.bottom;
         }
 
-        // TODO -
-    }
-
-    public syncTaskBottom(): void {
         // TODO -
     }
 
